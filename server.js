@@ -11,7 +11,7 @@ app.get('/', (req, res) => {
   res.send('Music Proxy Server is Live!');
 });
 
-// Proxy Search Endpoint (JioSaavn Official API)
+// Proxy Search Endpoint
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) {
@@ -71,12 +71,6 @@ app.get('/api/stream', async (req, res) => {
       .replace('_96.mp4', '_320.mp4')
       .replace('_160.mp4', '_320.mp4')
       .replace('v0.cdn.jiosaavn.com', 'aac.saavncdn.com');
-
-    try {
-      await axios.head(streamUrl, { timeout: 3000 });
-    } catch (_) {
-      streamUrl = streamUrl.replace('_320.mp4', '_160.mp4');
-    }
 
     return res.json({
       id: songId,
