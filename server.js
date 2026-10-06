@@ -11,6 +11,36 @@ app.get('/', (req, res) => {
   res.send('Music Proxy Server is Live!');
 });
 
+// Proxy Search Endpoint (JioSaavn Official API)
+app.get('/api/search', async (req, res) => {
+  const query = req.query.q;
+  if (!query) {
+    return res.status(400).json({ error: 'Missing search query' });
+  }
+
+  try {
+    const searchUrl = `https://www.jiosaavn.com/api.php?__call=autocomplete.get&_format=json&_marker=0&cc=in&includeMetaTags=1&query=${encodeURIComponent(query)}`;
+    const response = await axios.get(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    const songsData = response.data?.songs?.data || [];
+    const results = songsData.map(song => ({
+      id: song.id,
+      title: song.title ? song.title.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#039;/g, "'") : 'Unknown Track',
+      artist: song.more_info?.singers || song.subtitle || 'Unknown Artist',
+      imageUrl: song.image ? song.image.replace('150x150', '500x500') : ''
+    }));
+
+    return res.json({ results });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to search tracks' });
+  }
+});
+
+// Proxy Audio Stream Endpoint
 app.get('/api/stream', async (req, res) => {
   const songId = req.query.id;
   if (!songId) {
@@ -50,9 +80,6 @@ app.get('/api/stream', async (req, res) => {
 
     return res.json({
       id: songId,
-      title: songData['song'] || 'Unknown Track',
-      artist: songData['more_info']?.['singers'] || 'Unknown Artist',
-      imageUrl: (songData['image'] || '').replace('150x150', '500x500'),
       streamUrl: streamUrl
     });
 
