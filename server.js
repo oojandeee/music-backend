@@ -8,27 +8,32 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
+// Root Endpoint
 app.get('/', (req, res) => {
-  res.send('JioSaavn Proxy Server is Live!');
+  res.send('JioSaavn Proxy Server is Live and Ready!');
 });
 
-// Helper: Decrypt encrypted_media_url from JioSaavn using DES-ECB
+/**
+ * Helper: Decrypt encrypted_media_url from JioSaavn using DES-ECB
+ * Converts encrypted token into direct high-quality 320kbps CDN URL.
+ */
 function decryptMediaUrl(encryptedUrl) {
   try {
-    const key = '38588582';
+    const key = '38588582'; // Standard JioSaavn DES key
     const cipherBuffer = Buffer.from(encryptedUrl.trim(), 'base64');
     const decipher = crypto.createDecipheriv('des-ecb', Buffer.from(key), null);
     decipher.setAutoPadding(true);
     let decrypted = decipher.update(cipherBuffer, 'binary', 'utf8');
     decrypted += decipher.final('utf8');
-    // Force 320kbps full stream
+    // Swap bitrate quality flag to highest available 320kbps MP4 stream
     return decrypted.replace(/_96\.mp4|_160\.mp4/g, '_320.mp4');
   } catch (err) {
+    console.error('Decryption Error:', err.message);
     return null;
   }
 }
 
-// 1. Search Endpoint
+// 1. Search Songs Endpoint
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: 'Missing search query' });
@@ -36,7 +41,9 @@ app.get('/api/search', async (req, res) => {
   try {
     const searchUrl = `https://www.jiosaavn.com/api.php?__call=autocomplete.get&_format=json&_marker=0&cc=in&includeMetaTags=1&query=${encodeURIComponent(query)}`;
     const response = await axios.get(searchUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      }
     });
 
     const songsData = response.data?.songs?.data || [];
@@ -53,7 +60,7 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// 2. Stream Endpoint (Fixes Preview CDN issue)
+// 2. Fetch Stream Details Endpoint
 app.get('/api/stream', async (req, res) => {
   const songId = req.query.id;
   if (!songId) return res.status(400).json({ error: 'Missing song ID' });
@@ -61,7 +68,9 @@ app.get('/api/stream', async (req, res) => {
   try {
     const saavnUrl = `https://www.jiosaavn.com/api.php?__call=song.getDetails&cc=in&_marker=0&_format=json&pids=${songId}`;
     const response = await axios.get(saavnUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      }
     });
 
     const songData = response.data[songId];
@@ -69,16 +78,16 @@ app.get('/api/stream', async (req, res) => {
 
     let streamUrl = '';
 
-    // Priority 1: Decrypt full encrypted URL if available
+    // Priority 1: Decrypt full encrypted media URL
     if (songData['more_info']?.['encrypted_media_url']) {
       streamUrl = decryptMediaUrl(songData['more_info']['encrypted_media_url']);
     }
 
-    // Priority 2: Sanitize preview URL if fallback is needed
+    // Priority 2: Sanitize preview URL fallback to full track URL
     if (!streamUrl && songData['media_preview_url']) {
       streamUrl = songData['media_preview_url']
-        .replace('preview.saavncdn.com', 'aac.saavncdn.com') // Fix CDN host
-        .replace('_p.mp4', '.mp4')                         // Remove preview flag
+        .replace('preview.saavncdn.com', 'aac.saavncdn.com') // Replace preview domain
+        .replace('_p.mp4', '.mp4')                         // Strip preview tag
         .replace('_96.mp4', '_320.mp4')                    // Upgrade quality
         .replace('http:', 'https:');
     }
@@ -94,6 +103,36 @@ app.get('/api/stream', async (req, res) => {
   }
 });
 
+// 3. Audio Streaming Pipe Endpoint (Prevents Vivo / Android 403 Forbidden Block)
+app.get('/api/proxy-stream', async (req, res) => {
+  const { url } = req.query;
+
+  if (!url) {
+    return res.status(400).json({ error: 'Audio URL parameter is required' });
+  }
+
+  try {
+    const response = await axios({
+      method: 'get',
+      url: url,
+      responseType: 'stream',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Referer': 'https://www.jiosaavn.com/',
+      },
+    });
+
+    res.setHeader('Content-Type', 'audio/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    response.data.pipe(res);
+  } catch (err) {
+    console.error('Streaming Error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Audio pipe streaming failed', details: err.message });
+    }
+  }
+});
+
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
