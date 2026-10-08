@@ -8,8 +8,8 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// YouTube Session Cookies to bypass Render IP block & "Source error (0)"
-const youtubeCookies = [
+// YouTube Session Cookies array
+const rawCookies = [
   {
     "domain": ".youtube.com",
     "expirationDate": 1806928781.763488,
@@ -233,8 +233,14 @@ const youtubeCookies = [
   }
 ];
 
-// Create persistent agent with cookies
-const agent = ytdl.createAgent(youtubeCookies);
+// Initialize Agent with client spoofing
+const agent = ytdl.createAgent(rawCookies, {
+  client: 'ANDROID'
+});
+
+app.get('/', (req, res) => {
+  res.send('Server active!');
+});
 
 app.get('/stream', async (req, res) => {
   try {
@@ -244,19 +250,22 @@ app.get('/stream', async (req, res) => {
     }
 
     const info = await ytdl.getInfo(videoUrl, { agent });
-    const format = ytdl.chooseFormat(info.formats, { filter: 'audioandvideo', quality: 'highest' });
+    const format = ytdl.chooseFormat(info.formats, { 
+      filter: 'audioandvideo', 
+      quality: 'highestvideo' 
+    }) || ytdl.chooseFormat(info.formats, { filter: 'audioonly' });
 
     if (!format || !format.url) {
-      return res.status(500).json({ error: 'Stream URL not available' });
+      return res.status(500).json({ error: 'Stream URL missing' });
     }
 
     res.json({ streamUrl: format.url, title: info.videoDetails.title });
   } catch (error) {
-    console.error('Streaming error:', error);
-    res.status(500).json({ error: 'Failed to extract stream', details: error.message });
+    console.error('Extraction error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch stream', details: error.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
